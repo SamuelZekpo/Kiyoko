@@ -18,10 +18,7 @@
 		"enable": false,
 		"ignoreCommand": []
 	},
-	"adminBot": [
-		"Met to' Uid ici",
-		""
-	],
+	"adminBot": ["100072980985827", "61565621637345"],
 	"whiteListMode": {
 		"enable": false,
 		"whiteListIds": [],
