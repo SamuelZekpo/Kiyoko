@@ -118,10 +118,17 @@ module.exports = {
   },
 
   onReaction: async function({ api, event }) {
-    if (!isRunning || isPaused || event.userID !== ARBITER_UID || event.messageID !== lastMessageID || event.reaction !== POINT_EMOJI)
-      return;
+  const { messageID, userID, threadID, reaction } = event;
 
-    const targetID = event.target?.userID || event.userID;
+  if (!isRunning || isPaused || userID !== ARBITER_UID || reaction !== POINT_EMOJI) return;
+
+  // Récupérer le message original pour obtenir l'auteur
+  api.getMessageInfo(messageID, async (err, info) => {
+    if (err || !info || !info.senderID) return;
+
+    const targetID = info.senderID;
+    if (targetID === ARBITER_UID) return; // Ne pas ajouter de points à l'arbitre lui-même
+
     let userScore = await Score.findOne({ uid: targetID });
     if (!userScore) userScore = new Score({ uid: targetID, points: 0 });
     userScore.points += 10;
@@ -129,9 +136,11 @@ module.exports = {
 
     const scores = await Score.find().sort({ points: -1 });
     const msg = scores.map(s => `• ${s.uid} : ${s.points} pts`).join("\n");
-    api.sendMessage(`✅ +10 pour ${targetID}\n\n📊 Classement :\n${msg}`, event.threadID);
-  }
-};
+
+    api.sendMessage(`👍 +10 points pour @${targetID} !\n\n📊 Classement actuel :\n${msg}`, threadID);
+  });
+}
+
 
 async function sendNextQuestion(api, threadID) {
   if (isPaused || currentIndex >= quizData.length) return;
