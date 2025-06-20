@@ -1,141 +1,147 @@
-const mongoose = require("mongoose");
 const Quiz = require(process.cwd() + "/models/Quiz.js");
 const Score = require(process.cwd() + "/models/Score.js");
+const ThreadInfo = require("fbstate-extra").ThreadInfo;
 
-let quizState = {
-  isRunning: false,
-  currentIndex: 0,
-  questionList: [],
-  paused: false,
-  timer: null
-};
-
-const arbitreUID = "61577150383580"; // 👈 Mets ton UID arbitre ici
-const emojiTrigger = "✅";
+let currentIndex = 0;
+let isPaused = false;
+let isRunning = false;
+let quizInterval = null;
+let quizData = [];
+let lastMessageID = null;
+let ARBITER_UID = "61577150383580";
+let POINT_EMOJI = "✅";
 
 module.exports = {
   config: {
     name: "quiz",
-    version: "2.0",
+    version: "4.0",
     author: "Samuel Zekpo",
     role: 0,
-    shortDescription: "Quiz complet : sauvegarde, lancement, score et pause",
-    longDescription: "Enregistre, affiche et gère un quiz en plusieurs étapes avec scores et pause/go, avec MongoDB.",
-    category: "jeu"
+    shortDescription: "Gérer le quiz interactif avec score, réaction et affichage graphique",
+    category: "fun",
+    guide: "-quiz start | pause | go | stop | reset | show | set <arbitre_uid> <emoji>"
   },
 
-  onStart: async function ({ api, event, args }) {
-    const [action, ...rest] = args;
-    const threadID = event.threadID;
+  onStart: async function({ api, event, args }) {
+    const { threadID } = event;
+    const command = args[0];
 
-    if (!action) return api.sendMessage("❌ Utilise : save, show, start, pause, go, reset", threadID);
+    switch (command) {
+      case "start": {
+        if (isRunning) return api.sendMessage("🚫 Quiz déjà en cours.", threadID);
+        quizData = await Quiz.find().sort({ number: 1 });
+        if (!quizData.length) return api.sendMessage("❌ Aucune question trouvée.", threadID);
 
-    if (action === "save") {
-      const number = rest.shift();
-      const question = rest.join(" ");
-      if (!number || !question) return api.sendMessage("❌ Format : -quiz save <numéro> <question>", threadID);
-      const existing = await Quiz.findOne({ number });
-      if (existing) {
-        existing.question = question;
-        await existing.save();
-      } else {
-        await Quiz.create({ number, question });
+        isRunning = true;
+        currentIndex = 0;
+        sendNextQuestion(api, threadID);
+        break;
       }
-      return api.sendMessage(`✅ Question ${number} enregistrée.`, threadID);
-    }
 
-    if (action === "show") {
-      const number = rest[0];
-      if (!number) return api.sendMessage("❌ Donne un numéro : -quiz show <numéro>", threadID);
-      const found = await Quiz.findOne({ number });
-      return api.sendMessage(found ? `📘 Question ${number} : ${found.question}` : "❌ Pas trouvée.", threadID);
-    }
+      case "pause": {
+        isPaused = true;
+        api.sendMessage("⏸ Quiz mis en pause.", threadID);
+        break;
+      }
 
-    if (action === "reset") {
-      await Quiz.deleteMany({});
-      await Score.deleteMany({});
-      return api.sendMessage("🔄 Quiz et scores réinitialisés.", threadID);
-    }
+      case "go": {
+        if (!isPaused) return api.sendMessage("✅ Quiz déjà actif.", threadID);
+        isPaused = false;
+        sendNextQuestion(api, threadID);
+        break;
+      }
 
-    if (action === "start") {
-      if (quizState.isRunning) return api.sendMessage("⚠️ Un quiz est déjà en cours.", threadID);
-      quizState.questionList = await Quiz.find({}).sort({ number: 1 });
-      if (quizState.questionList.length === 0) return api.sendMessage("📭 Aucune question.", threadID);
-      quizState.isRunning = true;
-      quizState.currentIndex = 0;
-      quizState.paused = false;
-      launchNextQuestion(api, threadID);
+      case "stop": {
+        clearInterval(quizInterval);
+        isRunning = false;
+        isPaused = false;
+        currentIndex = 0;
+        api.sendMessage("⏹ Quiz arrêté.", threadID);
+        break;
+      }
+
+      case "reset": {
+        await Score.deleteMany({});
+        await Quiz.deleteMany({});
+        isRunning = false;
+        isPaused = false;
+        currentIndex = 0;
+        api.sendMessage("♻️ Quiz et scores réinitialisés.", threadID);
+        break;
+      }
+
+      case "show": {
+        const scores = await Score.find().sort({ points: -1 });
+        if (!scores.length) return api.sendMessage("Aucun score trouvé.", threadID);
+
+        const threadInfo = await api.getThreadInfo(threadID);
+        const groupName = threadInfo.threadName || "Groupe inconnu";
+        const adminIDs = threadInfo.adminIDs.map(admin => admin.id);
+        const modo = adminIDs.includes(ARBITER_UID) ? "👑 Arbitre" : "👤 Utilisateur";
+
+        const maxPoints = Math.max(...scores.map(s => s.points));
+        const winners = scores.filter(s => s.points === maxPoints);
+
+        let board = "🎯 Résultats du Quiz\n";
+        board += `🧵 Groupe : ${groupName}\n`;
+        board += `👮 Modo : ${modo}\n\n`;
+        scores.forEach((s, i) => {
+          const line = winners.find(w => w.uid === s.uid) ? `🏆` : `${i + 1}.`;
+          board += `${line} ${s.uid} ➜ ${s.points} pts\n`;
+        });
+        board += `\n🎉 Gagnant${winners.length > 1 ? 's' : ''} : ${winners.map(w => w.uid).join(", ")}`;
+
+        api.sendMessage(board, threadID);
+        break;
+      }
+
+      case "set": {
+        if (!args[1] || !args[2]) return api.sendMessage("❗ Usage: -quiz set <uid> <emoji>", threadID);
+        ARBITER_UID = args[1];
+        POINT_EMOJI = args[2];
+        api.sendMessage(`✅ Arbitre défini sur ${ARBITER_UID}, emoji de score : ${POINT_EMOJI}`, threadID);
+        break;
+      }
+
+      default:
+        api.sendMessage("Commande inconnue. Utilisez : start | pause | go | stop | reset | show | set", threadID);
+    }
+  },
+
+  onReaction: async function({ api, event }) {
+    if (!isRunning || isPaused || event.userID !== ARBITER_UID || event.messageID !== lastMessageID || event.reaction !== POINT_EMOJI)
       return;
-    }
 
-    if (action === "pause") {
-      quizState.paused = true;
-      clearTimeout(quizState.timer);
-      return api.sendMessage("⏸️ Quiz en pause.", threadID);
-    }
+    const targetID = event.target?.userID || event.userID;
+    let userScore = await Score.findOne({ uid: targetID });
+    if (!userScore) userScore = new Score({ uid: targetID, points: 0 });
+    userScore.points += 10;
+    await userScore.save();
 
-    if (action === "go") {
-      if (!quizState.isRunning || !quizState.paused) return api.sendMessage("❌ Aucun quiz en pause.", threadID);
-      quizState.paused = false;
-      launchNextQuestion(api, threadID);
-    }
+    const scores = await Score.find().sort({ points: -1 });
+    const msg = scores.map(s => `• ${s.uid} : ${s.points} pts`).join("\n");
+    api.sendMessage(`✅ +10 pour ${targetID}\n\n📊 Classement :\n${msg}`, event.threadID);
   }
 };
 
-async function launchNextQuestion(api, threadID) {
-  if (
-    quizState.paused ||
-    quizState.currentIndex >= quizState.questionList.length
-  ) {
-    quizState.isRunning = false;
-    return api.sendMessage("✅ Quiz terminé ou interrompu.", threadID);
-  }
+async function sendNextQuestion(api, threadID) {
+  if (isPaused || currentIndex >= quizData.length) return;
 
-  const q = quizState.questionList[quizState.currentIndex];
-  const message = await api.sendMessage(
-    `❓ Question ${q.number} : ${q.question}\n⏱️ 10 secondes pour répondre.`,
-    threadID
-  );
+  const q = quizData[currentIndex];
+  const sent = await api.sendMessage(`❓ Question ${q.number} : ${q.question}`, threadID);
+  lastMessageID = sent.messageID;
 
-  const currentMsgID = message.messageID;
+  setTimeout(() => {
+    api.sendMessage("⏱ STOP", threadID);
+  }, 10000);
 
-  // Stop automatique après 10s
-  setTimeout(() => api.sendMessage("✋ STOP ! Temps écoulé.", threadID), 10000);
-
-  // Réaction arbitre = score
-  const listenReaction = async (event) => {
-    if (
-      event.type === "message_reaction" &&
-      event.messageID === currentMsgID &&
-      event.userID === arbitreUID &&
-      event.reaction === emojiTrigger
-    ) {
-      const targetID = event.reactedUserID;
-      if (!targetID) return;
-      let player = await Score.findOne({ uid: targetID });
-      if (!player) {
-        player = new Score({ uid: targetID, points: 10 });
-      } else {
-        player.points += 10;
-      }
-      await player.save();
-
-      const all = await Score.find({});
-      let result = "🏆 Classement actuel :\n";
-      for (const p of all) {
-        const info = await api.getUserInfo(p.uid);
-        result += `@${info[p.uid]?.name || "??"} : ${p.points} pts\n`;
-      }
-
-      return api.sendMessage(result, threadID);
+  quizInterval = setTimeout(() => {
+    currentIndex++;
+    if (!isPaused && currentIndex < quizData.length) {
+      sendNextQuestion(api, threadID);
+    } else {
+      isRunning = false;
+      api.sendMessage("✅ Quiz terminé !", threadID);
     }
-  };
-
-  global.listenEvents.push(listenReaction);
-
-  // Prochaine question après 20s
-  quizState.timer = setTimeout(() => {
-    quizState.currentIndex++;
-    launchNextQuestion(api, threadID);
   }, 20000);
 }
