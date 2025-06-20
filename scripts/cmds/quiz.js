@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
-const Quiz = require("../models/Quiz");
-const Score = require("../models/Score");
+const Quiz = require("../models/Quiz.js");
+const Score = require("../models/Score.js");
 
 let quizState = {
   isRunning: false,
