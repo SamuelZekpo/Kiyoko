@@ -1,3 +1,4 @@
+//SAMUEL ZEKPO  
 // ✅ Commande avancée QUIZ avec pause/go/stop/arbitre/réactions/score
 
 const fs = require("fs");
