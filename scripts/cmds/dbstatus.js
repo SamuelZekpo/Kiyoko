@@ -1,7 +1,6 @@
 const mongoose = require("mongoose");
-const Quiz = require("../models/Quiz.js");
-const Score = require("../models/Score.js");
-
+const Quiz = require(process.cwd() + "/models/Quiz.js");
+const Score = require(process.cwd() + "/models/Score.js");
 module.exports = {
   config: {
     name: "dbstatus",
