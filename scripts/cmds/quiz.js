@@ -13,12 +13,12 @@ let POINT_EMOJI = "✅"; // emoji qui donne les points
 module.exports = {
   config: {
     name: "quiz",
-    version: "3.0",
+    version: "3.1",
     author: "Samuel Zekpo",
     role: 0,
-    shortDescription: "Gérer le quiz interactif avec score et réactions",
+    shortDescription: "Gérer le quiz interactif avec score, réactions et ajout de questions",
     category: "fun",
-    guide: "-quiz start | pause | go | stop | reset | show | set <uid> <emoji>"
+    guide: "-quiz s <num> <question> | start | pause | go | stop | reset | show | set <uid> <emoji>"
   },
 
   onStart: async function({ api, event, args }) {
@@ -26,6 +26,20 @@ module.exports = {
     const command = args[0];
 
     switch (command) {
+      case "s": {
+        const number = parseInt(args[1]);
+        const question = args.slice(2).join(" ");
+        if (!number || !question) return api.sendMessage("❌ Utilisation : -quiz s <num> <question>", threadID);
+
+        await Quiz.findOneAndUpdate(
+          { number },
+          { question },
+          { upsert: true, new: true }
+        );
+
+        return api.sendMessage(`✅ Question ${number} enregistrée !`, threadID);
+      }
+
       case "start": {
         if (isRunning) return api.sendMessage("🚫 Quiz déjà en cours.", threadID);
         quizData = await Quiz.find().sort({ number: 1 });
@@ -99,7 +113,7 @@ module.exports = {
       }
 
       default:
-        api.sendMessage("Commande inconnue. Utilisez : start | pause | go | stop | reset | show | set <uid> <emoji>", threadID);
+        api.sendMessage("Commande inconnue. Utilisez : s | start | pause | go | stop | reset | show | set <uid> <emoji>", threadID);
     }
   },
 
