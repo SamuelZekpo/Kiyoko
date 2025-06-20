@@ -1,6 +1,5 @@
 const Quiz = require(process.cwd() + "/models/Quiz.js");
 const Score = require(process.cwd() + "/models/Score.js");
-const ThreadInfo = require("fbstate-extra").ThreadInfo;
 
 let currentIndex = 0;
 let isPaused = false;
@@ -8,22 +7,22 @@ let isRunning = false;
 let quizInterval = null;
 let quizData = [];
 let lastMessageID = null;
-let ARBITER_UID = "61577150383580";
-let POINT_EMOJI = "✅";
+let ARBITER_UID = "61577150383580"; // uid de l'arbitre
+let POINT_EMOJI = "✅"; // emoji qui donne les points
 
 module.exports = {
   config: {
     name: "quiz",
-    version: "4.0",
+    version: "3.0",
     author: "Samuel Zekpo",
     role: 0,
-    shortDescription: "Gérer le quiz interactif avec score, réaction et affichage graphique",
+    shortDescription: "Gérer le quiz interactif avec score et réactions",
     category: "fun",
-    guide: "-quiz start | pause | go | stop | reset | show | set <arbitre_uid> <emoji>"
+    guide: "-quiz start | pause | go | stop | reset | show | set <uid> <emoji>"
   },
 
   onStart: async function({ api, event, args }) {
-    const { threadID } = event;
+    const { threadID, senderID } = event;
     const command = args[0];
 
     switch (command) {
@@ -52,7 +51,7 @@ module.exports = {
       }
 
       case "stop": {
-        clearInterval(quizInterval);
+        clearTimeout(quizInterval);
         isRunning = false;
         isPaused = false;
         currentIndex = 0;
@@ -70,41 +69,37 @@ module.exports = {
         break;
       }
 
-      case "show": {
-        const scores = await Score.find().sort({ points: -1 });
-        if (!scores.length) return api.sendMessage("Aucun score trouvé.", threadID);
-
-        const threadInfo = await api.getThreadInfo(threadID);
-        const groupName = threadInfo.threadName || "Groupe inconnu";
-        const adminIDs = threadInfo.adminIDs.map(admin => admin.id);
-        const modo = adminIDs.includes(ARBITER_UID) ? "👑 Arbitre" : "👤 Utilisateur";
-
-        const maxPoints = Math.max(...scores.map(s => s.points));
-        const winners = scores.filter(s => s.points === maxPoints);
-
-        let board = "🎯 Résultats du Quiz\n";
-        board += `🧵 Groupe : ${groupName}\n`;
-        board += `👮 Modo : ${modo}\n\n`;
-        scores.forEach((s, i) => {
-          const line = winners.find(w => w.uid === s.uid) ? `🏆` : `${i + 1}.`;
-          board += `${line} ${s.uid} ➜ ${s.points} pts\n`;
-        });
-        board += `\n🎉 Gagnant${winners.length > 1 ? 's' : ''} : ${winners.map(w => w.uid).join(", ")}`;
-
-        api.sendMessage(board, threadID);
-        break;
-      }
-
       case "set": {
-        if (!args[1] || !args[2]) return api.sendMessage("❗ Usage: -quiz set <uid> <emoji>", threadID);
+        if (!args[1] || !args[2]) return api.sendMessage("❌ Utilisation : -quiz set <uid> <emoji>", threadID);
         ARBITER_UID = args[1];
         POINT_EMOJI = args[2];
         api.sendMessage(`✅ Arbitre défini sur ${ARBITER_UID}, emoji de score : ${POINT_EMOJI}`, threadID);
         break;
       }
 
+      case "show": {
+        const scores = await Score.find().sort({ points: -1 });
+        if (!scores.length) return api.sendMessage("Aucun score trouvé.", threadID);
+
+        const topScore = scores[0].points;
+        const winners = scores.filter(s => s.points === topScore).map(s => `@${s.uid}`);
+
+        const msg = [
+          "🎯 Résultats du Quiz",
+          `🧵 Groupe : ${threadID}`,
+          `👮 Modo : ${ARBITER_UID}`,
+          "",
+          ...scores.map((s, i) => `${i + 1}. @${s.uid} ➜ ${s.points} pts`),
+          "",
+          `🎉 Gagnant${winners.length > 1 ? "s" : ""} : ${winners.join(", ")}`
+        ].join("\n");
+
+        api.sendMessage(msg, threadID);
+        break;
+      }
+
       default:
-        api.sendMessage("Commande inconnue. Utilisez : start | pause | go | stop | reset | show | set", threadID);
+        api.sendMessage("Commande inconnue. Utilisez : start | pause | go | stop | reset | show | set <uid> <emoji>", threadID);
     }
   },
 
